@@ -131,18 +131,40 @@ export function parseCSV(csvContent: string): CSVParseResult {
 
   const amountColIndex = findColumnIndex(headers, [
     'amount',
-    'debit',
-    'withdrawal',
-    'expense',
-    'spent',
   ]);
 
   const descColIndex = findColumnIndex(headers, [
     'description',
+    'name',
     'merchant',
     'payee',
-    'category',
+    'details',
   ]);
+
+  // Look for transaction type column (debit/credit indicator)
+  // Be specific - look for exact match or columns that indicate type, not date
+  const typeColIndex = findColumnIndex(headers, [
+    'type of transaction',
+    'trans type',
+    'transaction type',
+    'type',
+    'debit/credit',
+    'dr/cr',
+  ]);
+  
+  // If not found, check if there's a column called exactly "Transaction" (case-insensitive)
+  let actualTypeColIndex = typeColIndex;
+  if (actualTypeColIndex === -1) {
+    actualTypeColIndex = headers.findIndex(h => h.toLowerCase().trim() === 'transaction');
+  }
+  
+  console.log('📊 CSV Parser - Column indices:', {
+    date: dateColIndex,
+    amount: amountColIndex,
+    desc: descColIndex,
+    type: actualTypeColIndex,
+    headers: headers
+  });
 
   if (dateColIndex === -1 || amountColIndex === -1) {
     console.warn('⚠️  Could not find required columns. Headers:', headers);
@@ -176,8 +198,9 @@ export function parseCSV(csvContent: string): CSVParseResult {
     const dateStr = fields[dateColIndex]?.trim() || '';
     const amountStr = fields[amountColIndex]?.trim() || '';
     const desc = descColIndex >= 0 ? fields[descColIndex]?.trim() || '' : '';
+    const typeStr = actualTypeColIndex >= 0 ? fields[actualTypeColIndex]?.trim().toLowerCase() || '' : '';
 
-    // Parse amount (remove $ and commas, keep sign to filter out negative/refunds)
+    // Parse amount (remove $ and commas)
     let amount = 0;
     try {
       const cleanAmount = amountStr.replace(/[$,]/g, '').trim();
@@ -186,10 +209,18 @@ export function parseCSV(csvContent: string): CSVParseResult {
       continue; // Skip if amount can't be parsed
     }
 
-    // Only count positive amounts (ignore negative amounts/refunds)
-    if (isNaN(amount) || amount <= 0) {
+    if (isNaN(amount)) {
       continue;
     }
+
+    // If there's a type column, only include 'debit' transactions
+    // If no type column exists, include all transactions
+    if (actualTypeColIndex >= 0 && typeStr !== 'debit') {
+      continue;
+    }
+
+    // Use absolute value for spending
+    const spendingAmount = Math.abs(amount);
 
     // Parse date
     let date = new Date();
@@ -204,12 +235,12 @@ export function parseCSV(csvContent: string): CSVParseResult {
     transactions.push({
       date: date.toISOString().split('T')[0],
       description: desc,
-      amount,
+      amount: spendingAmount,
     });
 
     // Aggregate monthly spending
     const monthKey = date.toLocaleString('en-US', { year: 'numeric', month: 'long' });
-    monthlyMap.set(monthKey, (monthlyMap.get(monthKey) || 0) + amount);
+    monthlyMap.set(monthKey, (monthlyMap.get(monthKey) || 0) + spendingAmount);
 
     // Aggregate daily spending - use timezone-safe date formatting
     // Get UTC date components to avoid timezone shifts
@@ -218,7 +249,7 @@ export function parseCSV(csvContent: string): CSVParseResult {
     const utcDate = date.getUTCDate();
     const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
     const dayKey = `${monthNames[utcMonth]} ${utcDate}`;
-    dailyMap.set(dayKey, (dailyMap.get(dayKey) || 0) + amount);
+    dailyMap.set(dayKey, (dailyMap.get(dayKey) || 0) + spendingAmount);
 
     // Aggregate weekly spending (Monday-Sunday weeks)
     const weekStart = getWeekStart(date);
@@ -227,9 +258,9 @@ export function parseCSV(csvContent: string): CSVParseResult {
       weeklyMap.set(weekKey, { spending: 0, startDate: weekStart });
     }
     const weekData = weeklyMap.get(weekKey)!;
-    weekData.spending += amount;
+    weekData.spending += spendingAmount;
 
-    totalSpending += amount;
+    totalSpending += spendingAmount;
   }
 
   // Convert monthly map to array, sorted by date
