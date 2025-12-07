@@ -38,7 +38,7 @@ const AnalysisProgress: React.FC<AnalysisProgressProps> = ({ isLoading }) => {
     }, 3000);
 
     // Animate progress bar with easing curve
-    // Progresses quickly at first, then slows down as it approaches 85%
+    // Progresses quickly at first, then slows down as it approaches 95%
     const progressInterval = setInterval(() => {
       setProgress((prev) => {
         // Never decrease progress, only increase
@@ -47,7 +47,7 @@ const AnalysisProgress: React.FC<AnalysisProgressProps> = ({ isLoading }) => {
         // Easing function: starts fast, then slows down (quadratic ease-out)
         // This creates a smooth, natural-looking progress that doesn't reset
         const timeSeconds = elapsed / 1000;
-        const easeProgress = Math.min(1 - Math.pow(1 - timeSeconds / 30, 2), 0.85);
+        const easeProgress = Math.min(1 - Math.pow(1 - timeSeconds / 30, 2), 0.95);
         const newProgress = easeProgress * 100;
         
         // Only update if progress increases
@@ -158,6 +158,7 @@ const AnalysisProgress: React.FC<AnalysisProgressProps> = ({ isLoading }) => {
         borderRadius: '3px',
         overflow: 'hidden',
         marginBottom: '32px',
+        position: 'relative',
       }}>
         <div
           style={{
@@ -166,16 +167,55 @@ const AnalysisProgress: React.FC<AnalysisProgressProps> = ({ isLoading }) => {
             width: `${progress}%`,
             transition: 'width 0.8s ease',
             borderRadius: '3px',
-            boxShadow: '0 0 10px rgba(37, 99, 235, 0.4)',
+            boxShadow: progress >= 95 ? '0 0 20px rgba(37, 99, 235, 0.8)' : '0 0 10px rgba(37, 99, 235, 0.4)',
+            animation: progress >= 95 ? 'glow 1.5s ease-in-out infinite' : 'none',
           }}
         />
       </div>
+
+      {/* Pulse text when at 95% */}
+      <p style={{
+        fontSize: '13px',
+        color: progress >= 95 ? '#2563eb' : '#6b7280',
+        margin: '0 0 16px 0',
+        fontWeight: '500',
+        animation: progress >= 95 ? 'pulse-text 1.5s ease-in-out infinite' : 'none',
+      }}>
+        {progress >= 95 ? '✨ Almost there, finalizing your analysis...' : 'Processing your data...'}
+      </p>
 
       <style>{`
         @keyframes fadeInOut {
           0% { opacity: 0.5; }
           50% { opacity: 1; }
           100% { opacity: 0.5; }
+        }
+        
+        @keyframes glow {
+          0% {
+            box-shadow: 0 0 20px rgba(37, 99, 235, 0.8);
+          }
+          50% {
+            box-shadow: 0 0 30px rgba(37, 99, 235, 1), inset 0 0 10px rgba(255, 255, 255, 0.3);
+          }
+          100% {
+            box-shadow: 0 0 20px rgba(37, 99, 235, 0.8);
+          }
+        }
+        
+        @keyframes pulse-text {
+          0% {
+            opacity: 1;
+            transform: scale(1);
+          }
+          50% {
+            opacity: 0.7;
+            transform: scale(1.05);
+          }
+          100% {
+            opacity: 1;
+            transform: scale(1);
+          }
         }
       `}</style>
     </div>

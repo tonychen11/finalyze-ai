@@ -69,31 +69,51 @@ export async function POST(req: NextRequest) {
     console.log('📋 MIME type:', mimeType);
 
     // Use Google's Generative AI REST API with proper format
-    //const GEMINI_ENDPOINT = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent';
-    const GEMINI_ENDPOINT = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-3-pro-preview:generateContent';
+    // Switch models easily via GEMINI_MODEL env var (gemini-2.5-flash or gemini-3-pro-preview)
+    const modelName = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
+    const GEMINI_ENDPOINT = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent`;
     console.log('🌐 Gemini endpoint:', GEMINI_ENDPOINT);
 
-    // Load the prompt from file
+    // Load the prompt based on PROMPT_SOURCE configuration
     let promptTemplate = '';
-    try {
-      const promptPath = join(process.cwd(), 'src/prompts/gemini-analysis.txt');
-      promptTemplate = readFileSync(promptPath, 'utf-8');
-      console.log('📝 Loaded prompt from file');
-    } catch (promptErr) {
-      console.error('❌ Failed to load prompt file:', promptErr);
-      return NextResponse.json(
-        { 
-          error: 'Configuration error: prompt file not found',
-          mocked: false,
-        },
-        { status: 500 }
-      );
+    const promptSource = process.env.PROMPT_SOURCE || 'file';
+    
+    if (promptSource === 'env') {
+      // Load from environment variable
+      promptTemplate = (process.env.GEMINI_PROMPT || '').replace(/\\n/g, '\n').replace(/\\"/g, '"');
+      if (!promptTemplate) {
+        console.error('❌ PROMPT_SOURCE=env but GEMINI_PROMPT not configured');
+        return NextResponse.json(
+          { 
+            error: 'Configuration error: GEMINI_PROMPT environment variable not set',
+            mocked: false,
+          },
+          { status: 500 }
+        );
+      }
+      console.log('📝 Loaded prompt from environment variable');
+    } else {
+      // Load from file (default)
+      try {
+        const promptPath = join(process.cwd(), 'src/prompts/gemini-analysis.txt');
+        promptTemplate = readFileSync(promptPath, 'utf-8');
+        console.log('📝 Loaded prompt from file');
+      } catch (promptErr) {
+        console.error('❌ Failed to load prompt file:', promptErr);
+        return NextResponse.json(
+          { 
+            error: 'Configuration error: prompt file not found',
+            mocked: false,
+          },
+          { status: 500 }
+        );
+      }
     }
 
     // Build the final prompt with CSV total injected
     const finalPrompt = promptTemplate.replace(
-      '{CONTROL_TOTAL}',
-      csvAnalysis.totalSpending.toFixed(2)
+      /{CONTROL_TOTAL}/g,
+      `$${csvAnalysis.totalSpending.toFixed(2)}`
     );
 
     const requestBody = {
@@ -117,7 +137,6 @@ export async function POST(req: NextRequest) {
     try {
       console.log('🚀 Calling Gemini API...');
       const fullUrl = `${GEMINI_ENDPOINT}?key=${API_KEY}`;
-      console.log('🌐 Full API URL:', fullUrl);
       console.log('📤 Request body size:', JSON.stringify(requestBody).length, 'bytes');
       
       const response = await fetch(fullUrl, {
@@ -146,7 +165,6 @@ export async function POST(req: NextRequest) {
 
       const aiResponse = await response.json();
       console.log('✅ Gemini API response received:');
-      console.log(JSON.stringify(aiResponse, null, 2));
 
       // Extract text from Gemini's response structure
       let parsedContent = null;
@@ -183,8 +201,6 @@ export async function POST(req: NextRequest) {
             }
             
             console.log('✅ Successfully parsed JSON');
-            console.log('📋 Full parsed content:');
-            console.log(JSON.stringify(parsedContent, null, 2));
           } else {
             console.warn('⚠️  No JSON found in text content');
           }
@@ -198,10 +214,8 @@ export async function POST(req: NextRequest) {
       console.log('🎉 Returning parsed content:', parsedContent ? 'YES' : 'NO');
       if (parsedContent) {
         console.log('📊 categorizedTransactions:');
-        console.log(JSON.stringify(parsedContent.categorizedTransactions, null, 2));
-        console.log('💰 Parsed transaction amounts (for easy comparison):');
         const amounts = parsedContent.debug?.parsedTransactions?.map((t: any) => t.amount) || [];
-        amounts.forEach((amount: number) => console.log(amount));
+        //amounts.forEach((amount: number) => console.log(amount));
         
         // Write full response to file for debugging (no truncation)
         try {
@@ -216,14 +230,6 @@ export async function POST(req: NextRequest) {
           };
           writeFileSync(debugFile, JSON.stringify(debugContent, null, 2), 'utf-8');
           console.log(`📁 Full response saved to: ${debugFile}`);
-          
-          // Write transactions with amounts and descriptions in amount, description format
-          const transactionsTsvFile = join(process.cwd(), 'transactions-with-descriptions.txt');
-          const tsvContent = transactionsWithDescriptions
-            .map((t: any) => `${t.amount}, ${t.name}`)
-            .join('\n');
-          writeFileSync(transactionsTsvFile, tsvContent, 'utf-8');
-          console.log(`📁 Transactions with descriptions saved to: ${transactionsTsvFile}`);
         } catch (fileErr) {
           console.warn('⚠️  Could not write debug file:', fileErr);
         }
@@ -249,6 +255,7 @@ export async function POST(req: NextRequest) {
         { status: 500 }
       );
     }
+    
   } catch (err) {
     console.error('Server error in /api/analyze:', err);
     return NextResponse.json(
